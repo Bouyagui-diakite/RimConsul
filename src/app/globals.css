@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+  AfroConsul design system — tokens extracted from the PGC mockups.
+  Light theme only for now (the mockups have no dark mode).
+*/
+@theme {
+  /* surfaces & text */
+  --color-background: #f4f7fb;
+  --color-surface: #ffffff;
+  --color-border: #e7ecf3;
+  --color-foreground: #1f2a37;
+  --color-heading: #111827;
+  --color-muted: #6b7280;
+  --color-muted-light: #9ca3af;
+
+  /* brand accent (buttons, links, active nav) */
+  --color-primary: #1c9dc7;
+  --color-primary-dark: #1789af;
+  --color-primary-light: #e8f6fb;
+  --color-primary-foreground: #ffffff;
+
+  /* confirm / success */
+  --color-success: #57b947;
+  --color-success-dark: #4aa23c;
+
+  /* status chips */
+  --color-status-new: #2fa84f;
+  --color-status-new-bg: #e7f7ec;
+  --color-status-progress: #d9892b;
+  --color-status-progress-bg: #fdf3e3;
+  --color-status-done: #1c9dc7;
+  --color-status-done-bg: #e8f6fb;
+  --color-status-closed: #6b7280;
+  --color-status-closed-bg: #eef1f5;
+
+  /* Mauritania flag palette — used for the consular card artwork */
+  --color-mr-green: #006233;
+  --color-mr-gold: #ffc400;
+  --color-mr-red: #cd2a3e;
+
+  /* typography */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-poppins), var(--font-inter), sans-serif;
+
+  --radius-card: 14px;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+/* slim, subtle scrollbars to match the clean dashboard look */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cdd7e3 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #cdd7e3;
+  border-radius: 9999px;
+}
