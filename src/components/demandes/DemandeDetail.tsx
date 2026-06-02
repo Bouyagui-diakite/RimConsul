@@ -1,12 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import type { Beneficiary, CardRequest } from "@/lib/mock";
+import {
+  STATUS_LABELS,
+  type Beneficiary,
+  type CardRequest,
+  type RequestStatus,
+} from "@/lib/mock";
+import { updateRequestStatus } from "@/lib/actions";
 import { CardPreviewModal } from "@/components/card/CardPreviewModal";
 import { buildCardData } from "@/components/card/ConsularCard";
+import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Silhouette } from "@/components/card/symbols";
-import { ArrowLeft, CheckCircle } from "@/components/icons";
+import { ArrowLeft, CheckCircle, ChevronDown } from "@/components/icons";
+
+const STATUS_ORDER: RequestStatus[] = [
+  "nouveau",
+  "en_cours",
+  "traite",
+  "cloture",
+];
 
 function initials(b: Beneficiary) {
   return `${b.firstName[0] ?? ""}${b.lastName[0] ?? ""}`.toUpperCase();
@@ -35,6 +49,8 @@ export function DemandeDetail({ request }: { request: CardRequest }) {
         <h1 className="mt-4 font-display text-2xl font-bold text-heading">
           Demande #{request.id.slice(0, 8)}
         </h1>
+
+        <StatusControl requestId={request.id} current={request.status} />
 
         <div className="mt-4 grid grid-cols-2 gap-4">
           <Meta label="Type de carte" value={request.cardType} />
@@ -145,6 +161,59 @@ export function DemandeDetail({ request }: { request: CardRequest }) {
           />
         </aside>
       )}
+    </div>
+  );
+}
+
+function StatusControl({
+  requestId,
+  current,
+}: {
+  requestId: string;
+  current: RequestStatus;
+}) {
+  const [status, setStatus] = useState<RequestStatus>(current);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function change(next: RequestStatus) {
+    if (next === status) return;
+    const prev = status;
+    setStatus(next);
+    setError(null);
+    startTransition(async () => {
+      const res = await updateRequestStatus(requestId, next);
+      if (res.error) {
+        setStatus(prev);
+        setError(res.error);
+      }
+    });
+  }
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-3">
+      <span className="text-xs text-muted">Statut</span>
+      <StatusBadge status={status} />
+      <div className="relative">
+        <select
+          value={status}
+          disabled={pending}
+          onChange={(e) => change(e.target.value as RequestStatus)}
+          aria-label="Modifier le statut"
+          className="h-9 appearance-none rounded-lg border border-border bg-transparent pl-3 pr-9 text-sm font-medium text-foreground focus:border-primary focus:outline-none disabled:opacity-50"
+        >
+          {STATUS_ORDER.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_LABELS[s]}
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-light">
+          <ChevronDown size={16} />
+        </span>
+      </div>
+      {pending && <span className="text-xs text-muted">Enregistrement…</span>}
+      {error && <span className="text-xs text-mr-red">{error}</span>}
     </div>
   );
 }
