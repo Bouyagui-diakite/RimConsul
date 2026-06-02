@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { CardRequest } from "@/lib/mock";
 import { createClient } from "@/lib/supabase/client";
@@ -56,23 +56,39 @@ function longDate(d: Date) {
 function slotLabel(idx: number) {
   return `${SLOTS[idx][0].slice(0, 2)}H - ${SLOTS[idx][1].slice(0, 2)}H`;
 }
-function slotAvailable(day: Date, idx: number) {
-  return (day.getDate() + idx) % 5 !== 0;
+function slotKey(day: Date, idx: number) {
+  return `${toISODate(day)}|${slotLabel(idx)}`;
 }
+/** First Mon–Fri day of `weekStart` that is not in the past, else null. */
+function firstSelectable(weekStart: Date, todayStart: Date) {
+  for (let i = 0; i < 5; i++) {
+    const d = addDays(weekStart, i);
+    if (d >= todayStart) return d;
+  }
+  return null;
+}
+
+type SlotStatus = "available" | "past" | "taken";
 
 export function BookingForm({
   requests,
   demandeur,
+  bookedSlots,
 }: {
   requests: CardRequest[];
   demandeur: string;
+  bookedSlots: { date: string; slot: string }[];
 }) {
   const [base, setBase] = useState<Date | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [todayStart, setTodayStart] = useState<Date | null>(null);
   const [slot, setSlot] = useState<number | null>(null);
   const [reqId, setReqId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Slots discovered as taken this session (e.g. a race lost on submit), merged
+  // with the server-provided bookings.
+  const [extraTaken, setExtraTaken] = useState<Set<string>>(new Set());
   const [confirmed, setConfirmed] = useState<{
     date: string;
     slot: string;
@@ -80,10 +96,36 @@ export function BookingForm({
   } | null>(null);
 
   useEffect(() => {
-    const w = startOfWeek(new Date());
+    const now = new Date();
+    const t = new Date(now);
+    t.setHours(0, 0, 0, 0);
+    let w = startOfWeek(now);
+    let sel = firstSelectable(w, t);
+    if (!sel) {
+      // Whole displayed week is in the past (e.g. weekend) → jump to next week.
+      w = addDays(w, 7);
+      sel = w;
+    }
+    setTodayStart(t);
     setBase(w);
-    setSelectedDay(w);
+    setSelectedDay(sel);
   }, []);
+
+  const takenSet = useMemo(() => {
+    const s = new Set(bookedSlots.map((b) => `${b.date}|${b.slot}`));
+    for (const k of extraTaken) s.add(k);
+    return s;
+  }, [bookedSlots, extraTaken]);
+
+  function slotStatus(day: Date, idx: number): SlotStatus {
+    if (!todayStart) return "available";
+    if (day < todayStart) return "past";
+    const start = new Date(day);
+    start.setHours(parseInt(SLOTS[idx][0].slice(0, 2), 10), 0, 0, 0);
+    if (start <= new Date()) return "past";
+    if (takenSet.has(slotKey(day, idx))) return "taken";
+    return "available";
+  }
 
   const req = requests.find((r) => r.id === reqId);
   const days = base ? Array.from({ length: 5 }, (_, i) => addDays(base, i)) : [];
@@ -91,19 +133,18 @@ export function BookingForm({
     ? cap(base.toLocaleDateString("fr-FR", { month: "long" }))
     : "";
 
+  function goToWeek(nb: Date) {
+    setBase(nb);
+    setSelectedDay(todayStart ? (firstSelectable(nb, todayStart) ?? nb) : nb);
+    setSlot(null);
+  }
   function shiftWeek(weeks: number) {
     if (!base) return;
-    const nb = addDays(base, weeks * 7);
-    setBase(nb);
-    setSelectedDay(nb);
-    setSlot(null);
+    goToWeek(addDays(base, weeks * 7));
   }
   function shiftMonth(months: number) {
     if (!base) return;
-    const nb = startOfWeek(new Date(base.getFullYear(), base.getMonth() + months, 1));
-    setBase(nb);
-    setSelectedDay(nb);
-    setSlot(null);
+    goToWeek(startOfWeek(new Date(base.getFullYear(), base.getMonth() + months, 1)));
   }
 
   const canValidate = !!req && !!selectedDay && slot !== null && !saving;
@@ -114,6 +155,10 @@ export function BookingForm({
 
   async function handleValidate() {
     if (!req || !selectedDay || slot === null) return;
+    if (slotStatus(selectedDay, slot) !== "available") {
+      setError("Ce créneau n'est plus disponible. Choisissez-en un autre.");
+      return;
+    }
     setSaving(true);
     setError(null);
     const supabase = createClient();
@@ -125,7 +170,14 @@ export function BookingForm({
     });
     setSaving(false);
     if (error) {
-      setError("Échec de l'enregistrement du rendez-vous. Réessayez.");
+      // 23505 = unique_violation → another agent took this slot first.
+      if (error.code === "23505") {
+        setExtraTaken((prev) => new Set(prev).add(slotKey(selectedDay, slot)));
+        setSlot(null);
+        setError("Ce créneau vient d'être réservé. Choisissez-en un autre.");
+      } else {
+        setError("Échec de l'enregistrement du rendez-vous. Réessayez.");
+      }
       return;
     }
     setConfirmed({
@@ -179,9 +231,11 @@ export function BookingForm({
               <div className="grid flex-1 grid-cols-5 gap-2">
                 {days.map((d) => {
                   const active = selectedDay && sameDay(d, selectedDay);
+                  const past = todayStart ? d < todayStart : false;
                   return (
                     <button
                       key={d.toISOString()}
+                      disabled={past}
                       onClick={() => {
                         setSelectedDay(d);
                         setSlot(null);
@@ -189,7 +243,9 @@ export function BookingForm({
                       className={`flex flex-col items-center rounded-lg border py-2 transition-colors ${
                         active
                           ? "border-primary bg-primary-light"
-                          : "border-border hover:bg-background"
+                          : past
+                            ? "cursor-not-allowed border-border opacity-40"
+                            : "border-border hover:bg-background"
                       }`}
                     >
                       <span className="text-xs text-muted">
@@ -217,7 +273,8 @@ export function BookingForm({
 
             <div className="mt-5 space-y-2">
               {SLOTS.map((s, idx) => {
-                const avail = selectedDay ? slotAvailable(selectedDay, idx) : false;
+                const status = selectedDay ? slotStatus(selectedDay, idx) : "past";
+                const avail = status === "available";
                 const selected = slot === idx;
                 return (
                   <button
@@ -249,7 +306,11 @@ export function BookingForm({
                       </span>
                     </span>
                     <span className={avail ? "text-status-new" : "text-muted-light"}>
-                      {avail ? "Disponible" : "Indisponible"}
+                      {status === "available"
+                        ? "Disponible"
+                        : status === "taken"
+                          ? "Réservé"
+                          : "Passé"}
                     </span>
                   </button>
                 );

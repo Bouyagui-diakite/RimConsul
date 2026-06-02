@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { isoToFr, longFrDate } from "@/lib/format";
+import { isoToFr, longFrDate, toISODate } from "@/lib/format";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   CardRequest,
@@ -146,6 +146,22 @@ export async function getRequest(id: string): Promise<CardRequest | null> {
     unitCount: bens.length,
     beneficiaries: bens,
   };
+}
+
+/** Upcoming (today onward) booked (date, slot) pairs, for availability checks. */
+export async function listBookedSlots(): Promise<
+  { date: string; slot: string }[]
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("appointment_date, slot")
+    .gte("appointment_date", toISODate(new Date()));
+  if (error) throw error;
+  return (data as { appointment_date: string; slot: string }[]).map((r) => ({
+    date: r.appointment_date,
+    slot: r.slot,
+  }));
 }
 
 export async function listAppointments(): Promise<Appointment[]> {

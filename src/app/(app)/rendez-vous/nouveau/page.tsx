@@ -1,9 +1,13 @@
-import { listRequests } from "@/lib/db";
+import { listRequests, listBookedSlots } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { BookingForm } from "@/components/rendezvous/BookingForm";
 
 export default async function NouveauRendezVousPage() {
-  const [requests, supabase] = await Promise.all([listRequests(), createClient()]);
+  const [requests, bookedSlots, supabase] = await Promise.all([
+    listRequests(),
+    listBookedSlots(),
+    createClient(),
+  ]);
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -11,5 +15,11 @@ export default async function NouveauRendezVousPage() {
     (user?.user_metadata?.name as string | undefined) ||
     (user?.email ? user.email.split("@")[0] : "Agent");
 
-  return <BookingForm requests={requests} demandeur={demandeur} />;
+  return (
+    <BookingForm
+      requests={requests}
+      demandeur={demandeur}
+      bookedSlots={bookedSlots}
+    />
+  );
 }
