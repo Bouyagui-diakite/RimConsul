@@ -52,11 +52,7 @@ function isComplete(d: Draft) {
   return REQUIRED.every((k) => String(d[k] ?? "").trim() !== "");
 }
 
-function genReference() {
-  const n = Math.floor(1000 + Math.random() * 9000);
-  const yy = new Date().getFullYear().toString().slice(2);
-  return `N°${n}AFC${yy}`;
-}
+const REFERENCE_PLACEHOLDER = "N° attribué à la soumission";
 
 export default function NouvelleDemandePage() {
   const [cardType, setCardType] = useState<string>(CARD_TYPES[0]);
@@ -67,14 +63,16 @@ export default function NouvelleDemandePage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState<{ count: number; deadline: string } | null>(null);
+  const [submitted, setSubmitted] = useState<{
+    reference: string;
+    count: number;
+    deadline: string;
+  } | null>(null);
   const [today, setToday] = useState("");
-  const [reference, setReference] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setToday(isoToFr(toISODate(new Date())));
-    setReference(genReference());
   }, []);
 
   const draft = drafts[current];
@@ -141,21 +139,20 @@ export default function NouvelleDemandePage() {
     setError(null);
 
     const supabase = createClient();
-    const ref = reference || genReference();
     const deadlineDate = new Date();
     deadlineDate.setDate(deadlineDate.getDate() + 14);
     const deadlineISO = toISODate(deadlineDate);
 
     try {
+      // The reference is assigned server-side (sequence + trigger) and read back.
       const { data: reqRow, error: reqErr } = await supabase
         .from("requests")
         .insert({
-          reference: ref,
           card_type: cardType,
           status: "nouveau",
           deadline: deadlineISO,
         })
-        .select("id")
+        .select("id, reference")
         .single();
       if (reqErr || !reqRow) throw reqErr ?? new Error("insert request failed");
 
@@ -189,16 +186,27 @@ export default function NouvelleDemandePage() {
       const { error: benErr } = await supabase.from("beneficiaries").insert(rows);
       if (benErr) throw benErr;
 
-      setSubmitted({ count: complete.length, deadline: isoToFr(deadlineISO) });
-    } catch {
-      setError("Échec de l'enregistrement de la demande. Vérifiez votre connexion et réessayez.");
+      setSubmitted({
+        reference: reqRow.reference,
+        count: complete.length,
+        deadline: isoToFr(deadlineISO),
+      });
+    } catch (e) {
+      console.error("Submit demande failed:", e);
+      const detail =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "";
+      setError(
+        `Échec de l'enregistrement de la demande.${detail ? ` (${detail})` : ""} Vérifiez votre connexion et réessayez.`,
+      );
     } finally {
       setSaving(false);
     }
   }
 
   const previewData: ConsularCardData = {
-    reference: reference || "—",
+    reference: "—",
     lastName: draft.lastName || "—",
     firstName: draft.firstName,
     dob: isoToFr(draft.dob),
@@ -305,7 +313,9 @@ export default function NouvelleDemandePage() {
 
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-5">
           <div className="flex items-center gap-4">
-            <span className="font-display font-bold text-heading">{reference}</span>
+            <span className="font-display text-sm font-medium italic text-muted">
+              {REFERENCE_PLACEHOLDER}
+            </span>
             <button
               onClick={() => setPreviewOpen(true)}
               className="text-sm font-medium text-primary hover:underline"
@@ -531,10 +541,12 @@ function Field({
 }
 
 function Confirmation({
+  reference,
   cardType,
   count,
   deadline,
 }: {
+  reference: string;
   cardType: string;
   count: number;
   deadline: string;
@@ -554,7 +566,8 @@ function Confirmation({
           <p className="text-sm text-foreground">
             Bonjour,
             <br />
-            Votre demande de cartes a été soumise.
+            Votre demande de cartes <span className="font-semibold text-heading">{reference}</span>{" "}
+            a été soumise.
           </p>
           <Link
             href="/demandes"
