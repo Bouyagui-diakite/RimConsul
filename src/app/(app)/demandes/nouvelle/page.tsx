@@ -143,33 +143,24 @@ export default function NouvelleDemandePage() {
     deadlineDate.setDate(deadlineDate.getDate() + 14);
     const deadlineISO = toISODate(deadlineDate);
 
-    try {
-      // The reference is assigned server-side (sequence + trigger) and read back.
-      const { data: reqRow, error: reqErr } = await supabase
-        .from("requests")
-        .insert({
-          card_type: cardType,
-          status: "nouveau",
-          deadline: deadlineISO,
-        })
-        .select("id, reference")
-        .single();
-      if (reqErr || !reqRow) throw reqErr ?? new Error("insert request failed");
+    // Generate the request id client-side so photos (keyed by request id) can be
+    // uploaded before the request + beneficiaries are inserted atomically.
+    const requestId = crypto.randomUUID();
 
-      const rows = [];
+    try {
+      const beneficiaries = [];
       for (let i = 0; i < complete.length; i++) {
         const d = complete[i];
         let photo_path: string | null = null;
         if (d.photoFile) {
           const ext = d.photoFile.name.split(".").pop() || "jpg";
-          const path = `${reqRow.id}/${i}.${ext}`;
+          const path = `${requestId}/${i}.${ext}`;
           const { error: upErr } = await supabase.storage
             .from("photos")
             .upload(path, d.photoFile, { upsert: true });
           if (!upErr) photo_path = path;
         }
-        rows.push({
-          request_id: reqRow.id,
+        beneficiaries.push({
           last_name: d.lastName,
           first_name: d.firstName,
           dob: d.dob || null,
@@ -183,11 +174,22 @@ export default function NouvelleDemandePage() {
         });
       }
 
-      const { error: benErr } = await supabase.from("beneficiaries").insert(rows);
-      if (benErr) throw benErr;
+      // Atomic: request + beneficiaries inserted in one transaction (RPC).
+      const { data, error: rpcErr } = await supabase.rpc(
+        "create_request_with_beneficiaries",
+        {
+          p_id: requestId,
+          p_card_type: cardType,
+          p_deadline: deadlineISO,
+          p_beneficiaries: beneficiaries,
+        },
+      );
+      if (rpcErr) throw rpcErr;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) throw new Error("création de la demande échouée");
 
       setSubmitted({
-        reference: reqRow.reference,
+        reference: row.out_reference,
         count: complete.length,
         deadline: isoToFr(deadlineISO),
       });
